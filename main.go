@@ -12,8 +12,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
+	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
 )
 
 type DiscordUser struct {
@@ -104,6 +106,7 @@ func main() {
 	db = CreateLocalClient()
 	CreateTableIfNotExists(db, *Table)
 	writeDiscordUsers(discordUsers)
+	printVotesOfDb()
 }
 
 func writeDiscordUsers(discordUsers []DiscordUser) {
@@ -114,6 +117,33 @@ func writeDiscordUsers(discordUsers []DiscordUser) {
 		}
 		_, _ = writeInDynamoDB(db, item, *Table)
 	}
+}
+
+func printVotesOfDb() {
+	condition := expression.Name("voting_phases").AttributeExists()
+	votes := map[string]uint32{
+		*Phase: uint32(100),
+	}
+	condition = condition.And(expression.In(expression.Name("voting_phases"), expression.Value(votes)))
+	expr, err := expression.NewBuilder().WithCondition(condition).Build()
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	input := &dynamodb.ScanInput{
+		TableName:                 aws.String(*Table),
+		ExpressionAttributeNames:  expr.Names(),
+		ExpressionAttributeValues: expr.Values(),
+		FilterExpression:          expr.Condition(),
+	}
+
+	out, err := db.Scan(input)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	fmt.Println(*out.Count)
 }
 
 func prepareHttpClient() http.Client {
