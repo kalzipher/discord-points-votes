@@ -12,12 +12,12 @@ import (
 
 func CreateLocalClient() *dynamodb.DynamoDB {
 
-	creds := credentials.NewStaticCredentials("123", "123", "")
+	creds := credentials.NewStaticCredentials(*AccessKeyID, *SecretAccessKey, "")
 	awsConfig := &aws.Config{
 		Credentials: creds,
 	}
-	awsConfig.WithRegion("us-east-1")
-	awsConfig.WithEndpoint("http://localhost:8000")
+	awsConfig.WithRegion(*Region)
+	awsConfig.WithEndpoint(*Endpoint)
 
 	s, err := session.NewSession(awsConfig)
 	if err != nil {
@@ -30,6 +30,8 @@ func CreateLocalClient() *dynamodb.DynamoDB {
 func CreateTableIfNotExists(d *dynamodb.DynamoDB, tableName string) {
 	if tableExists(d, tableName) {
 		log.Printf("table=%v already exists\n", tableName)
+		d.DeleteTable(&dynamodb.DeleteTableInput{ TableName: &tableName })	
+		log.Fatal("Destroy")
 		return
 	}
 	_, err := d.CreateTable(buildCreateTableInput(tableName))
@@ -43,13 +45,13 @@ func buildCreateTableInput(tableName string) *dynamodb.CreateTableInput {
 	return &dynamodb.CreateTableInput{
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{
 			{
-				AttributeName: aws.String("id"),
+				AttributeName: aws.String("userID"),
 				AttributeType: aws.String("S"),
 			},
 		},
 		KeySchema: []*dynamodb.KeySchemaElement{
 			{
-				AttributeName: aws.String("id"),
+				AttributeName: aws.String("userID"),
 				KeyType:       aws.String("HASH"),
 			},
 		},
@@ -60,7 +62,7 @@ func buildCreateTableInput(tableName string) *dynamodb.CreateTableInput {
 
 func tableExists(d *dynamodb.DynamoDB, name string) bool {
 	tables, err := d.ListTables(&dynamodb.ListTablesInput{})
-	if err != nil {
+	if err != nil {	
 		log.Fatal("ListTables failed", err)
 	}
 	for _, n := range tables.TableNames {

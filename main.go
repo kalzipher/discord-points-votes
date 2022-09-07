@@ -12,40 +12,29 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
 )
 
 type DiscordUser struct {
-	DiscordUserID string            `json:"id"`
-	VotingPhases  map[string]uint32 `json:"voting_phases"`
-}
-
-type Leaderboard struct {
-	Status string       `json:"status"`
-	Points []UserPoints `json:"leaderboard"`
-}
-
-type UserPoints struct {
-	Uuid           string `json:"userID"`
-	Points_phase_1 int    `json:"balance"`
+	UserID  string `json:"userID"`
+	Balance int    `json:"balance"`
 }
 
 var (
-	Url    = flag.String("url", "", "Points api url")
-	Cookie = flag.String("cookie", "", "cookie of points api")
-	Table  = flag.String("table", "", "Table name")
-	Phase  = flag.String("phase", "", "voting phase name")
+	ServerId        = flag.String("serverId", "", "server discord id")
+	Token           = flag.String("token", "", "token of points api")
+	Table           = flag.String("table", "", "Table name")
+	Endpoint        = flag.String("endpoint", "http://localhost:8000", "URL to connect database on aws")
+	Region          = flag.String("region", "sa-east-1", "Region from aws")
+	AccessKeyID     = flag.String("accessKeyId", "i1ie5", "access key aws")
+	SecretAccessKey = flag.String("secretAccessKey", "582psh", "secret access key aws")
 )
 
 var db *dynamodb.DynamoDB
 
 func init() {
 	flag.Parse()
-	prepareHttpClient()
-	prepareRequest()
 }
 
 func main() {
@@ -58,16 +47,13 @@ func main() {
 		log.Fatal(getErr)
 	}
 
-	if res.Body != nil {
-		defer res.Body.Close()
-	}
+	defer res.Body.Close()
 
 	jsonData := getJSONData(res)
 
-	var leaderboard Leaderboard
 	discordUsers := []DiscordUser{}
 
-	jsonErr := json.Unmarshal([]byte(jsonData), &leaderboard)
+	jsonErr := json.Unmarshal([]byte(jsonData), &discordUsers)
 	if jsonErr != nil {
 		log.Fatal(jsonErr)
 	}
@@ -85,80 +71,50 @@ func main() {
 	}
 	w := csv.NewWriter(file)
 	defer w.Flush()
-	// Using Write
-	for _, user := range leaderboard.Points {
+	header := []string{"userDiscordId", "balance"}
 
-		discordUser := DiscordUser{
-			DiscordUserID: user.Uuid,
-			VotingPhases: map[string]uint32{
-				*Phase: uint32(user.Points_phase_1),
-			},
-		}
+	if err := w.Write(header); err != nil {
+		fmt.Println(err)
+	}
 
-		discordUsers = append(discordUsers, discordUser)
-
-		row := []string{user.Uuid, strconv.Itoa(user.Points_phase_1)}
-		if err := w.Write(row); err != nil {
-			log.Fatalln("error writing record to file", err)
+	for _, discordUser := range discordUsers {
+		err = w.Write([]string{discordUser.UserID, strconv.Itoa(discordUser.Balance)})
+		if err != nil {
+			fmt.Println(err)
 		}
 	}
 
 	db = CreateLocalClient()
 	CreateTableIfNotExists(db, *Table)
 	writeDiscordUsers(discordUsers)
-	printVotesOfDb()
+
+	/*
+		printVotesOfDb() */
 }
 
 func writeDiscordUsers(discordUsers []DiscordUser) {
 	for _, discordUser := range discordUsers {
 		item, err := dynamodbattribute.MarshalMap(discordUser)
 		if err != nil {
-			fmt.Println(err)
+			log.Println("Error to write", err)
 		}
 		_, _ = writeInDynamoDB(db, item, *Table)
 	}
 }
 
-func printVotesOfDb() {
-	condition := expression.Name("voting_phases").AttributeExists()
-	votes := map[string]uint32{
-		*Phase: uint32(100),
-	}
-	condition = condition.And(expression.In(expression.Name("voting_phases"), expression.Value(votes)))
-	expr, err := expression.NewBuilder().WithCondition(condition).Build()
-
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	input := &dynamodb.ScanInput{
-		TableName:                 aws.String(*Table),
-		ExpressionAttributeNames:  expr.Names(),
-		ExpressionAttributeValues: expr.Values(),
-		FilterExpression:          expr.Condition(),
-	}
-
-	out, err := db.Scan(input)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	fmt.Println(*out.Count)
-}
-
 func prepareHttpClient() http.Client {
 	api := http.Client{
-		Timeout: time.Second * 5, // Timeout after 2 seconds
+		Timeout: time.Second * 30, // Timeout after 2 seconds
 	}
 	return api
 }
 
 func prepareRequest() *http.Request {
-	request, err := http.NewRequest(http.MethodGet, *Url, nil)
+	request, err := http.NewRequest(http.MethodGet, fmt.Sprintf("https://api.points.city/api/guilds/%s/leaderboard", *ServerId), nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	request.Header.Set("Cookie", *Cookie)
+	request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", *Token))
 	return request
 }
 
